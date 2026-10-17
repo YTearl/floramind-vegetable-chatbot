@@ -5,7 +5,10 @@ FastAPI server powering Floramind Vegetable Gardening & Cultivation AI.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from app.config import settings
 from app.routers import chat, vegetables, calculator, admin
@@ -38,26 +41,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register API Routers
+# Register API Routers first
 app.include_router(chat.router)
 app.include_router(vegetables.router)
 app.include_router(calculator.router)
 app.include_router(admin.router)
 
-@app.get("/")
-async def root():
-    return {
-        "app": "Floramind AI",
-        "tagline": "Intelligent and Reliable Vegetable Gardening and Cultivation Chatbot",
-        "version": "1.0.0",
-        "docs_url": "/docs",
-        "endpoints": {
-            "chat": "/api/chat",
-            "vegetables": "/api/vegetables",
-            "fertilizer_calculator": "/api/calculator/fertilizer",
-            "status": "/api/admin/status"
+# Locate frontend dist if built
+possible_dist_paths = [
+    Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+    Path("/app/frontend/dist"),
+    Path(__file__).resolve().parent.parent / "dist",
+    Path("frontend/dist")
+]
+
+frontend_dist = None
+for p in possible_dist_paths:
+    if p.exists() and (p / "index.html").exists():
+        frontend_dist = p
+        break
+
+if frontend_dist:
+    print(f"[Floramind] Serving compiled React frontend from: {frontend_dist}")
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(frontend_dist / "index.html")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_route(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
+            return None
+        target_file = frontend_dist / full_path
+        if target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(frontend_dist / "index.html")
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "app": "Floramind AI",
+            "tagline": "Intelligent and Reliable Vegetable Gardening and Cultivation Chatbot",
+            "version": "1.0.0",
+            "docs_url": "/docs",
+            "endpoints": {
+                "chat": "/api/chat",
+                "vegetables": "/api/vegetables",
+                "fertilizer_calculator": "/api/calculator/fertilizer",
+                "status": "/api/admin/status"
+            }
         }
-    }
 
 if __name__ == "__main__":
     import uvicorn
